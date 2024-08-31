@@ -1,0 +1,110 @@
+Here is our first code; it is a release candidate (RC) because it is designed to test the motors.
+//Aquí está nuestro primer código; es un candidato a liberación (RC) porque está diseñado para probar los motores.
+#include "BluetoothSerial.h"
+#include <Arduino.h>
+#include <ESP32Servo.h>
+
+BluetoothSerial serialBT;
+Servo servoMotor;
+
+// Bluetooth signal almacenado en esta variable
+char btSignal;
+
+// Velocidad inicial
+int speed = 255;  // Velocidad máxima inicial
+
+// Pines para controlar el motor derecho
+int motorDerechoPin1 = 26;
+int motorDerechoPin2 = 27;
+
+// Pin para el servomotor
+int servoPin = 25;
+
+void setup() {
+  Serial.begin(115200);
+
+  // Nombre Bluetooth
+  serialBT.begin("EXPERIMENTS&PROJECTS");
+
+  // Configurar pines como salida para motores
+  pinMode(motorDerechoPin1, OUTPUT);
+  pinMode(motorDerechoPin2, OUTPUT);
+//  pinMode(motorIzquierdoPin1, OUTPUT);
+//  pinMode(motorIzquierdoPin2, OUTPUT);
+
+  // Configurar el servomotor
+  servoMotor.attach(servoPin);
+  servoMotor.write(90); // Posición inicial del servo
+
+  // Estado inicial del vehículo
+  stop();
+}
+
+void loop() {
+  if (serialBT.available()) {
+    btSignal = serialBT.read();
+    Serial.println(btSignal);
+
+    // Control de velocidad
+    if (btSignal >= '0' && btSignal <= '9') {
+      speed = 100 + (btSignal - '0') * 10;
+      if (speed > 255) {
+        speed = 255;
+      }
+    } else if (btSignal == 'q') {
+      speed = 255;
+    }
+
+    // Control de dirección
+    switch (btSignal) {
+      case 'F':
+        forward();
+        break;
+      case 'B':
+        backward();
+        break;
+      case 'L':
+        turnLeft();
+        break;
+      case 'R':
+        turnRight();
+        break;
+      case 'S':
+        stop();
+        break;
+      default:
+        break;
+    }
+  }
+}
+
+// Funciones de control de dirección
+void forward() {
+  digitalWrite(motorDerechoPin1, HIGH);
+  digitalWrite(motorDerechoPin2, LOW);
+//  digitalWrite(motorIzquierdoPin1, HIGH);
+ // digitalWrite(motorIzquierdoPin2, LOW);
+}
+
+void backward() {
+  digitalWrite(motorDerechoPin1, LOW);
+  digitalWrite(motorDerechoPin2, HIGH);
+//  digitalWrite(motorIzquierdoPin1, LOW);
+ // digitalWrite(motorIzquierdoPin2, HIGH);
+}
+
+void turnLeft() {
+  servoMotor.write(0); // Gira el servo a la izquierda
+}
+
+void turnRight() {
+  servoMotor.write(180); // Gira el servo a la derecha
+}
+
+void stop() {
+  digitalWrite(motorDerechoPin1, LOW);
+  digitalWrite(motorDerechoPin2, LOW);
+  //digitalWrite(motorIzquierdoPin1, LOW);
+  //digitalWrite(motorIzquierdoPin2, LOW);
+  servoMotor.write(90); // Regresa el servo a la posición neutral
+}
