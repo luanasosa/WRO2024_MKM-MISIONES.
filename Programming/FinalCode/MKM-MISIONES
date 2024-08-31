@@ -1,0 +1,209 @@
+#include <Wire.h>              // Librería para comunicación I2C (sensor VL53L0X)
+#include <VL53L0X.h>           // Librería para el sensor VL53L0X
+#include <NewPing.h>           // Librería para manejo de sensores ultrasónicos
+#include <Servo.h>             // Librería para controlar el servomotor
+
+// Definición de pines
+#define PWMA 5    // Pin PWM para controlar la velocidad del motor DC
+#define AIN1 9    // Pin para dirección del motor DC
+#define AIN2 10   // Pin para dirección del motor DC
+
+#define ECHO_RIGHT 8
+#define TRIG_RIGHT A3
+#define ECHO_LEFT A0
+#define TRIG_LEFT A1
+
+#define BUTTON_RIGHT 2
+#define BUTTON_LEFT 13
+
+#define SERVO_PIN 4  // Pin para controlar el servomotor
+#define MAX_DISTANCE 200
+
+NewPing sonarRight(TRIG_RIGHT, ECHO_RIGHT, MAX_DISTANCE);
+NewPing sonarLeft(TRIG_LEFT, ECHO_LEFT, MAX_DISTANCE);
+VL53L0X sensorFrontal;
+
+// Variables de control
+bool followRightWall = false;
+bool followLeftWall = false;
+int vueltasCompletadas = 0; // Contador de vueltas
+bool enRuta = false;        // Estado para saber si está cerca de un punto de vuelta
+unsigned long tiempoInicio;  // Temporizador para 3 minutos
+
+Servo myServo;  // Objeto para controlar el servomotor
+
+// Funciones para el control del motor DC
+void avanzar() {
+  digitalWrite(AIN1, HIGH);
+  digitalWrite(AIN2, LOW);
+  analogWrite(PWMA, 100);  // Velocidad del motor
+}
+
+void retroceder() {
+  digitalWrite(AIN1, LOW);
+  digitalWrite(AIN2, HIGH);
+  analogWrite(PWMA, 100);  // Velocidad del motor
+}
+
+void detener() {
+  digitalWrite(AIN1, LOW);
+  digitalWrite(AIN2, LOW);
+  analogWrite(PWMA, 0);
+}
+
+// Funciones para el control del servomotor
+void girarIzquierda() {
+  myServo.attach(SERVO_PIN);
+  myServo.write(0);  // Gira el servomotor a la izquierda
+  delay(500);  // Espera para que el servomotor complete el giro
+  myServo.detach();  // Desactiva el servomotor para ahorrar energía
+}
+
+void girarDerecha() {
+  myServo.attach(SERVO_PIN);
+  myServo.write(180);  // Gira el servomotor a la derecha
+  delay(500);  // Espera para que el servomotor complete el giro
+  myServo.detach();  // Desactiva el servomotor para ahorrar energía
+}
+
+void centrarServo() {
+  myServo.attach(SERVO_PIN);
+  myServo.write(90);  // Centra el servomotor
+  delay(500);  // Espera para que el servomotor se centre
+  myServo.detach();  // Desactiva el servomotor para ahorrar energía
+}
+
+void setup() {
+  // Configuración de pines
+  pinMode(PWMA, OUTPUT);
+  pinMode(AIN1, OUTPUT);
+  pinMode(AIN2, OUTPUT);
+  
+  pinMode(ECHO_RIGHT, INPUT);
+  pinMode(TRIG_RIGHT, OUTPUT);
+  
+  pinMode(ECHO_LEFT, INPUT);
+  pinMode(TRIG_LEFT, OUTPUT);
+
+  pinMode(BUTTON_RIGHT, INPUT_PULLUP);
+  pinMode(BUTTON_LEFT, INPUT_PULLUP);
+
+  // Inicialización del servomotor
+  centrarServo();
+
+  Serial.begin(9600);  // Para depuración
+  Wire.begin();        // Inicia comunicación I2C
+
+  // Inicialización del sensor VL53L0X
+  sensorFrontal.init();
+  sensorFrontal.setTimeout(500);
+  sensorFrontal.startContinuous();
+
+  // Mensaje inicial
+  Serial.println("Robot listo para evitar obstáculos.");
+  tiempoInicio = millis(); // Inicia el temporizador
+}
+
+void loop() {
+  // Comprobación de los botones
+  if (digitalRead(BUTTON_RIGHT) == LOW) {
+    followRightWall = true;
+    followLeftWall = false;
+    Serial.println("Modo: Seguir pared derecha.");
+  }
+  
+  if (digitalRead(BUTTON_LEFT) == LOW) {
+    followLeftWall = true;
+    followRightWall = false;
+    Serial.println("Modo: Seguir pared izquierda.");
+  }
+
+  // Lectura del sensor VL53L0X
+  uint16_t distanceFront = sensorFrontal.readRangeContinuousMillimeters();
+
+  // Imprimir valor del sensor frontal
+  Serial.print("Distancia al frente: ");
+  Serial.print(distanceFront);
+  Serial.println(" mm");
+
+  if (sensorFrontal.timeoutOccurred()) {
+    Serial.println("Error: Sensor frontal no responde.");
+    detener();
+  } else if (distanceFront < 200) {  // Umbral de detección de obstáculo (ajustar según el sensor)
+    Serial.println("Obstáculo detectado al frente, girando a la izquierda.");
+    detener();
+
+    girarIzquierda();  // Gira el servomotor a la izquierda
+    delay(500);        // Espera para el movimiento del servomotor
+    
+    avanzar();         // Avanza el motor DC
+    delay(1000);       // Avanza por un tiempo antes de corregir la dirección
+    
+    centrarServo();    // Regresa el servomotor a la posición centrada
+    delay(500);        // Pausa para asegurar que el servo alcance la posición
+  } else {
+    // Si no hay obstáculos frontales, sigue las paredes según el modo seleccionado
+
+    if (followRightWall) {
+      unsigned int distanceRight = sonarRight.ping_cm();
+      Serial.print("Distancia a la derecha: ");
+      Serial.println(distanceRight);
+
+      if (distanceRight > 15 && distanceRight <= 30) {
+        centrarServo();  // Mantén la dirección recta
+        avanzar();  // Avanza el motor DC
+      } else if (distanceRight <= 15) {
+        girarIzquierda(); // Ajusta ligeramente hacia la izquierda
+        avanzar();        // Avanza el motor DC
+      } else if (distanceRight > 30) {
+        girarDerecha();   // Ajusta ligeramente hacia la derecha
+        avanzar();        // Avanza el motor DC
+      }
+    }
+
+    if (followLeftWall) {
+      unsigned int distanceLeft = sonarLeft.ping_cm();
+      Serial.print("Distancia a la izquierda: ");
+      Serial.println(distanceLeft);
+
+      if (distanceLeft > 15 && distanceLeft <= 30) {
+        centrarServo();  // Mantén la dirección recta
+        avanzar();  // Avanza el motor DC
+      } else if (distanceLeft <= 15) {
+        girarDerecha(); // Ajusta ligeramente hacia la derecha
+        avanzar();      // Avanza el motor DC
+      } else if (distanceLeft > 30) {
+        girarIzquierda();   // Ajusta ligeramente hacia la izquierda
+        avanzar();          // Avanza el motor DC
+      }
+    }
+  }
+
+  // Lógica para contar las vueltas
+  if (distanceFront < 50) { // Ajusta el umbral según la ruta
+    if (!enRuta) {
+      vueltasCompletadas++;
+      enRuta = true; // Cambia el estado a "en ruta"
+      Serial.print("Vueltas completadas: ");
+      Serial.println(vueltasCompletadas);
+    }
+  } else {
+    enRuta = false; // Si no está cerca de un punto de vuelta, resetea el estado
+  }
+
+  // Comprobar si se completaron las 3 vueltas y el tiempo
+  if (vueltasCompletadas >= 3) {
+    Serial.println("Se completaron las 3 vueltas. Regresar a la posición de inicio.");
+    detener();
+    // Aquí puedes agregar la lógica para regresar a la posición inicial
+  }
+
+  // Comprobar si han pasado 3 minutos
+  if (millis() - tiempoInicio >= 180000) { // 180000 ms = 3 minutos
+    Serial.println("Tiempo límite alcanzado. Deteniendo el robot.");
+    detener();
+    // Puedes agregar lógica para regresar a la posición inicial si es necesario
+  }
+
+  delay(100);  // Delay para estabilidad de lectura de sensores
+}
